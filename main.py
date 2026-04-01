@@ -8,7 +8,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-CHAT_ID = os.environ.get("CHAT_ID")  # 
+CHAT_ID = os.environ.get("CHAT_ID")  
 
 
 app = ApplicationBuilder().token(BOT_TOKEN).build()
@@ -27,10 +27,8 @@ USERS = [
     {"name": "Jack", "balance": 900},
     {"name": "Kate", "balance": 10000},
     {"name": "Leo", "balance": 3500},
-]
 
 DAILY_RATE = 0.02  2%，
-
 
 def generate_pool_message():
     
@@ -60,7 +58,7 @@ async def send_pool_message():
     else:
         print("CHAT_ID not set, skipping send_pool_message")
 
-# /start 命令
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Bot is running!")
 
