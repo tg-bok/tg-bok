@@ -2,15 +2,21 @@ import os
 import random
 import asyncio
 import pytz
-from telegram import Update
-from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
-from apscheduler.schedulers.background import BackgroundScheduler
+from fastapi import FastAPI, Request
+import uvicorn
+from telegram import Update, Bot
+from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters, Application
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN not set")
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # 例如 https://yourapp.up.railway.app/bot
+PORT = int(os.environ.get("PORT", 8000))
 
-app = ApplicationBuilder().token(BOT_TOKEN).build()
+if not BOT_TOKEN or not WEBHOOK_URL:
+    raise ValueError("BOT_TOKEN or WEBHOOK_URL not set")
+
+app_telegram: Application = ApplicationBuilder().token(BOT_TOKEN).build()
+bot = Bot(BOT_TOKEN)
 groups = set()
 
 async def auto_save_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -54,8 +60,8 @@ def generate_users(count):
         users.append({"name": f"User{i+1}", "balance": balance})
     return users
 
-async def generate_pool_message(chat_id, context):
-    total_users = await context.bot.get_chat_member_count(chat_id)
+async def generate_pool_message(chat_id):
+    total_users = await bot.get_chat_member_count(chat_id)
     users = generate_users(total_users)
     total_funds = sum(u["balance"] for u in users)
     total_profit = sum(u["balance"] * get_rate(u["balance"]) for u in users)
@@ -84,36 +90,36 @@ async def send_pool_message():
         return
     for chat_id in groups:
         try:
-            text = await generate_pool_message(chat_id, app)
-            await app.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+            text = await generate_pool_message(chat_id)
+            await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
             print(f"Sent to: {chat_id}")
         except Exception as e:
             print(f"Failed to send to {chat_id}: {e}")
 
-def run_async_job():
-    try:
-        loop = asyncio.get_event_loop()
-        loop.create_task(send_pool_message())
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(send_pool_message())
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Bot is running")
 
-app.add_handler(CommandHandler("start", start))
-app.add_handler(MessageHandler(filters.ALL, auto_save_group))
+app_telegram.add_handler(CommandHandler("start", start))
+app_telegram.add_handler(MessageHandler(filters.ALL, auto_save_group))
 
-scheduler = BackgroundScheduler(timezone=pytz.timezone("America/New_York"))
-scheduler.add_job(run_async_job, 'cron', hour=10, minute=0)
-scheduler.add_job(run_async_job, 'cron', hour=15, minute=0)
-scheduler.add_job(run_async_job, 'cron', hour=18, minute=0)
+scheduler = AsyncIOScheduler(timezone=pytz.timezone("America/New_York"))
+scheduler.add_job(send_pool_message, 'cron', hour=10, minute=0)
+scheduler.add_job(send_pool_message, 'cron', hour=15, minute=0)
+scheduler.add_job(send_pool_message, 'cron', hour=18, minute=0)
 scheduler.start()
 
-def main():
-    print("Bot started")
-    app.run_polling()
+fastapi_app = FastAPI()
+
+@fastapi_app.post("/bot")
+async def telegram_webhook(request: Request):
+    data = await request.json()
+    update = Update.de_json(data, bot)
+    await app_telegram.update_queue.put(update)
+    return {"ok": True}
 
 if __name__ == "__main__":
-    main()
+    # 设置 Webhook
+    bot.delete_webhook()
+    bot.set_webhook(url=WEBHOOK_URL)
+    print(f"Webhook set to {WEBHOOK_URL}")
+    uvicorn.run(fastapi_app, host="0.0.0.0", port=PORT)
