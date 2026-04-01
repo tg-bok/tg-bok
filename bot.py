@@ -22,37 +22,60 @@ async def auto_save_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
             groups.add(chat.id)
             print(f"Saved group: {chat.id}")
 
-USERS = [
-    {"name": "Alice", "balance": 5000},
-    {"name": "Bob", "balance": 15000},
-    {"name": "Charlie", "balance": 700},
-    {"name": "David", "balance": 12000},
-    {"name": "Eva", "balance": 300},
-    {"name": "Frank", "balance": 2500},
-    {"name": "Grace", "balance": 8000},
-    {"name": "Hank", "balance": 600},
-    {"name": "Ivy", "balance": 4000},
-    {"name": "Jack", "balance": 900},
-    {"name": "Kate", "balance": 10000},
-    {"name": "Leo", "balance": 3500},
-]
-DAILY_RATE = 0.02
+def get_rate(balance):
+    if 100 <= balance <= 999:
+        return 0.01
+    elif 1000 <= balance <= 4999:
+        return 0.015
+    elif 5000 <= balance <= 9999:
+        return 0.02
+    elif 10000 <= balance <= 49999:
+        return 0.025
+    elif 50000 <= balance <= 99999:
+        return 0.03
+    elif 100000 <= balance <= 299999:
+        return 0.035
+    elif 300000 <= balance <= 499999:
+        return 0.04
+    elif 500000 <= balance <= 1000000:
+        return 0.05
+    else:
+        return 0.01
 
-def generate_pool_message():
-    selected_users = random.sample(USERS, min(10, len(USERS)))
-    total_users = len(USERS)
-    total_funds = sum(u["balance"] for u in USERS)
-    total_profit = sum(u["balance"] * DAILY_RATE for u in USERS)
-    msg = "OnchainETH Node\n\n"
+def generate_users(count):
+    users = []
+    for i in range(count):
+        balance = random.randint(100, 20000)
+        if random.random() < 0.15:
+            balance = random.randint(50000, 200000)
+        if random.random() < 0.05:
+            balance = random.randint(300000, 800000)
+        balance = int(balance * random.uniform(0.95, 1.05))
+        users.append({"name": f"User{i+1}", "balance": balance})
+    return users
+
+async def generate_pool_message(chat_id, context):
+    total_users = await context.bot.get_chat_member_count(chat_id)
+    users = generate_users(total_users)
+    total_funds = sum(u["balance"] for u in users)
+    total_profit = sum(u["balance"] * get_rate(u["balance"]) for u in users)
+
+    msg = "<pre>"
+    msg += "Onchain Wallet ETH Mining Node\n\n"
     msg += f"Total Users: {total_users}\n"
     msg += f"Total Funds: ${total_funds}\n"
-    msg += f"Daily Rate: {DAILY_RATE*100}%\n"
+    msg += "Daily Rate: 1% - 5%\n"
     msg += f"Total Profit Today: ${total_profit:.2f}\n\n"
+
+    selected_users = random.sample(users, min(10, len(users)))
     msg += "User Details:\n"
     for u in selected_users:
-        profit = u["balance"] * DAILY_RATE
-        msg += f"{u['name']}: Balance ${u['balance']}, Profit ${profit:.2f}\n"
-    msg += "\nRandom partial user data"
+        rate = get_rate(u["balance"])
+        profit = u["balance"] * rate
+        msg += f"{u['name']}: Balance ${u['balance']}, Rate {rate*100:.1f}%, Profit ${profit:.2f}\n"
+
+    msg += "\nReal-time onchain data update"
+    msg += "</pre>"
     return msg
 
 async def send_pool_message():
@@ -61,7 +84,8 @@ async def send_pool_message():
         return
     for chat_id in groups:
         try:
-            await app.bot.send_message(chat_id=chat_id, text=generate_pool_message())
+            text = await generate_pool_message(chat_id, app)
+            await app.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
             print(f"Sent to: {chat_id}")
         except Exception as e:
             print(f"Failed to send to {chat_id}: {e}")
