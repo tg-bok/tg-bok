@@ -5,17 +5,20 @@ import pytz
 from fastapi import FastAPI, Request
 import uvicorn
 from telegram import Update, Bot
-from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters, Application
+from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # 例如 https://yourapp.up.railway.app/bot
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 PORT = int(os.environ.get("PORT", 8000))
 
-if not BOT_TOKEN or not WEBHOOK_URL:
-    raise ValueError("BOT_TOKEN or WEBHOOK_URL not set")
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN not set")
 
-app_telegram: Application = ApplicationBuilder().token(BOT_TOKEN).build()
+print("BOT_TOKEN:", BOT_TOKEN)
+print("WEBHOOK_URL:", WEBHOOK_URL if WEBHOOK_URL else "Not set, using polling mode")
+
+app_telegram = ApplicationBuilder().token(BOT_TOKEN).build()
 bot = Bot(BOT_TOKEN)
 groups = set()
 
@@ -118,8 +121,11 @@ async def telegram_webhook(request: Request):
     return {"ok": True}
 
 if __name__ == "__main__":
-    # 设置 Webhook
-    bot.delete_webhook()
-    bot.set_webhook(url=WEBHOOK_URL)
-    print(f"Webhook set to {WEBHOOK_URL}")
-    uvicorn.run(fastapi_app, host="0.0.0.0", port=PORT)
+    if WEBHOOK_URL:
+        bot.delete_webhook()
+        bot.set_webhook(url=WEBHOOK_URL)
+        print(f"Webhook set to {WEBHOOK_URL}")
+        uvicorn.run(fastapi_app, host="0.0.0.0", port=PORT)
+    else:
+        print("No WEBHOOK_URL set, running in polling mode")
+        app_telegram.run_polling()
