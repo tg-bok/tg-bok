@@ -1,5 +1,5 @@
 python-telegram-bot==20.4
-pytz
-fastapi
-uvicorn[standard]
-APScheduler
+fastapi==0.104.0
+uvicorn[standard]==0.23.2
+apscheduler==3.11.1
+pytz==2026.3
