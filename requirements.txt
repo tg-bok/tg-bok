@@ -1,5 +1,4 @@
-python-telegram-bot==20.4
-fastapi==0.104.0
-uvicorn[standard]==0.23.2
-apscheduler==3.10.4
-pytz==2024.1
+flask
+requests
+psycopg[binary]
+openai
