@@ -1,0 +1,3 @@
+from 基础版_step37_p0_cleanup_step42_medium_low_cleanup import create_production_app
+
+app = create_production_app()
