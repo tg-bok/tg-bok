@@ -1,4 +1,4 @@
-Flask
-openai
-psycopg[binary]
-gunicorn
+Flask>=3.0,<4
+openai>=1.30.0
+psycopg[binary]>=3.1,<4
+gunicorn>=23.0.0
