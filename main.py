@@ -130,18 +130,8 @@ def _patch_reply_style_generate():
         original = cls.generate
 
         def patched_generate(self, *args, **kwargs):
-            args = list(args)
-            for idx in [1, 6, 7, 8]:
-                if idx < len(args):
-                    args[idx] = _to_jsonable(args[idx])
-
-            for key in ["recent_context", "understanding", "reply_plan", "selected_content", "user_state_snapshot", "memory_summary"]:
-                if key in kwargs:
-                    kwargs[key] = _to_jsonable(kwargs.get(key))
-
             if "training_packet" in kwargs and "training_packet" not in inspect.signature(original).parameters:
                 kwargs.pop("training_packet", None)
-
             return original(self, *args, **kwargs)
 
         cls.generate = patched_generate
@@ -159,16 +149,8 @@ def _patch_reply_self_check():
         original = cls.check_and_fix
 
         def patched_check_and_fix(self, *args, **kwargs):
-            args = list(args)
-            if len(args) >= 3:
-                args[2] = _to_jsonable(args[2])
-
-            if "understanding" in kwargs:
-                kwargs["understanding"] = _to_jsonable(kwargs.get("understanding"))
-
             if "training_packet" in kwargs and "training_packet" not in inspect.signature(original).parameters:
                 kwargs.pop("training_packet", None)
-
             return original(self, *args, **kwargs)
 
         cls.check_and_fix = patched_check_and_fix
@@ -179,23 +161,6 @@ def _patch_reply_self_check():
                 patch_class(obj)
             except Exception:
                 pass
-
-
-def _patch_build_reply_prompt_json_safe():
-    original = appmod.build_reply_prompt
-
-    def patched_build_reply_prompt(*args, **kwargs):
-        args = list(args)
-        for idx in [1, 6, 7, 8]:
-            if idx < len(args):
-                args[idx] = _to_jsonable(args[idx])
-
-        for key in ["recent_context", "understanding", "reply_plan", "selected_content", "memory_summary", "user_state_snapshot"]:
-            if key in kwargs:
-                kwargs[key] = _to_jsonable(kwargs.get(key))
-        return original(*args, **kwargs)
-
-    appmod.build_reply_prompt = patched_build_reply_prompt
 
 
 def _patch_conversation_repo_save_message():
@@ -221,13 +186,12 @@ _patch_soft_clip()
 _patch_json_dumps_safe()
 _patch_reply_style_generate()
 _patch_reply_self_check()
-_patch_build_reply_prompt_json_safe()
 _patch_conversation_repo_save_message()
 
 Settings = appmod.Settings
 setup_logging = appmod.setup_logging
 logger = appmod.logger
-build_app_components = appmod.build_app_components
+initialize_runtime = appmod.initialize_runtime
 create_web_app = appmod.create_web_app
 
 
@@ -244,18 +208,10 @@ def create_app():
 
     logger.info("Starting application via main.py wrapper.")
 
-    app_components = build_app_components(settings)
-
-    tg_client = app_components["tg_client"]
-    if settings.telegram_webhook_url:
-        try:
-            tg_client.ensure_webhook(
-                webhook_url=settings.telegram_webhook_url,
-                secret_token=settings.telegram_webhook_secret_token,
-            )
-            logger.info("Telegram webhook ensured.")
-        except Exception:
-            logger.exception("Failed to ensure Telegram webhook.")
+    # IMPORTANT:
+    # initialize_runtime() is what starts outbound_sender_worker.
+    # Using build_app_components() directly will enqueue replies but never send them.
+    app_components = initialize_runtime(settings)
 
     app = create_web_app(settings, app_components)
     app.config["APP_SETTINGS"] = settings
