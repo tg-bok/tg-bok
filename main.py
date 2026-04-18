@@ -5,9 +5,8 @@ import step92_structural_convergence_final_cutover as appmod
 def _patch_release_flag_compat():
     """
     修复 step92 内部 Step82 发布候选校验的 flag 命名不一致问题。
-    这不是业务逻辑缺失，而是 release candidate 的 feature-flag 对账过严。
+    这是发布候选校验层的兼容补丁，不是跳过真实业务错误。
     """
-
     original_report_builder = appmod._step82_collect_release_candidate_report
 
     def patched_report_builder(app_components):
@@ -84,4 +83,14 @@ def create_app():
             logger.exception("Failed to ensure Telegram webhook.")
 
     app = create_web_app(settings, app_components)
-    app.config["APP
+    app.config["APP_SETTINGS"] = settings
+    app.config["APP_COMPONENTS"] = app_components
+    return app
+
+
+app = create_app()
+
+
+if __name__ == "__main__":
+    settings = app.config["APP_SETTINGS"]
+    app.run(host=settings.webhook_host, port=settings.webhook_port)
