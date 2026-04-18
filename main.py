@@ -4,7 +4,7 @@ import step92_structural_convergence_final_cutover as appmod
 
 
 def _to_jsonable(obj, depth=0):
-    if depth > 6:
+    if depth > 8:
         return str(obj)
 
     if obj is None or isinstance(obj, (str, int, float, bool)):
@@ -16,9 +16,22 @@ def _to_jsonable(obj, depth=0):
     if isinstance(obj, (list, tuple, set)):
         return [_to_jsonable(v, depth + 1) for v in obj]
 
+    iso = getattr(obj, "isoformat", None)
+    if callable(iso):
+        try:
+            return iso()
+        except Exception:
+            pass
+
     if hasattr(obj, "_asdict"):
         try:
             return _to_jsonable(obj._asdict(), depth + 1)
+        except Exception:
+            pass
+
+    if hasattr(obj, "model_dump") and callable(getattr(obj, "model_dump")):
+        try:
+            return _to_jsonable(obj.model_dump(), depth + 1)
         except Exception:
             pass
 
@@ -42,10 +55,6 @@ def _to_jsonable(obj, depth=0):
 
 
 def _patch_release_flag_compat():
-    """
-    修复 step92 内部 Step82 发布候选校验的 flag 命名不一致问题。
-    这是发布候选校验层的兼容补丁，不是跳过真实业务错误。
-    """
     original_report_builder = appmod._step82_collect_release_candidate_report
 
     def patched_report_builder(app_components):
@@ -90,68 +99,130 @@ def _patch_soft_clip():
             text = "" if value is None else str(value)
             if limit is None or limit <= 0:
                 return text
-            return text if len(text) <= limit else text[: max(0, limit - 1)] + "…"
+            return text if len(text) <= limit else text[: max(0, limit - 1)] + "â¦"
         appmod._soft_clip = _soft_clip
 
 
+def _patch_json_dumps_safe():
+    original_json_dumps = appmod.json.dumps
+
+    def safe_dumps(obj, *args, **kwargs):
+        user_default = kwargs.pop("default", None)
+
+        def chained_default(value):
+            if user_default is not None:
+                try:
+                    return user_default(value)
+                except TypeError:
+                    pass
+                except Exception:
+                    pass
+            return _to_jsonable(value)
+
+        kwargs["default"] = chained_default
+        return original_json_dumps(obj, *args, **kwargs)
+
+    appmod.json.dumps = safe_dumps
+
+
 def _patch_reply_style_generate():
-    cls = appmod.ReplyStyleEngine
-    original = cls.generate
-    original_sig = inspect.signature(original)
+    def patch_class(cls):
+        original = cls.generate
 
-    def patched_generate(self, *args, **kwargs):
-        if "understanding" in kwargs:
-            kwargs["understanding"] = _to_jsonable(kwargs.get("understanding"))
-        if "reply_plan" in kwargs:
-            kwargs["reply_plan"] = _to_jsonable(kwargs.get("reply_plan"))
-        if "selected_content" in kwargs:
-            kwargs["selected_content"] = _to_jsonable(kwargs.get("selected_content"))
-        if "user_state_snapshot" in kwargs:
-            kwargs["user_state_snapshot"] = _to_jsonable(kwargs.get("user_state_snapshot"))
-        if "training_packet" in kwargs and "training_packet" not in original_sig.parameters:
-            kwargs.pop("training_packet", None)
-        return original(self, *args, **kwargs)
+        def patched_generate(self, *args, **kwargs):
+            args = list(args)
+            for idx in [1, 6, 7, 8]:
+                if idx < len(args):
+                    args[idx] = _to_jsonable(args[idx])
 
-    cls.generate = patched_generate
+            for key in ["recent_context", "understanding", "reply_plan", "selected_content", "user_state_snapshot", "memory_summary"]:
+                if key in kwargs:
+                    kwargs[key] = _to_jsonable(kwargs.get(key))
+
+            if "training_packet" in kwargs and "training_packet" not in inspect.signature(original).parameters:
+                kwargs.pop("training_packet", None)
+
+            return original(self, *args, **kwargs)
+
+        cls.generate = patched_generate
+
+    for _, obj in vars(appmod).items():
+        if inspect.isclass(obj) and getattr(obj, "__name__", "") == "ReplyStyleEngine" and hasattr(obj, "generate"):
+            try:
+                patch_class(obj)
+            except Exception:
+                pass
 
 
 def _patch_reply_self_check():
-    cls = appmod.ReplySelfCheckEngine
-    original = cls.check_and_fix
-    original_sig = inspect.signature(original)
+    def patch_class(cls):
+        original = cls.check_and_fix
 
-    def patched_check_and_fix(self, *args, **kwargs):
-        if "understanding" in kwargs:
-            kwargs["understanding"] = _to_jsonable(kwargs.get("understanding"))
-        if "training_packet" in kwargs and "training_packet" not in original_sig.parameters:
-            kwargs.pop("training_packet", None)
-        return original(self, *args, **kwargs)
+        def patched_check_and_fix(self, *args, **kwargs):
+            args = list(args)
+            if len(args) >= 3:
+                args[2] = _to_jsonable(args[2])
 
-    cls.check_and_fix = patched_check_and_fix
+            if "understanding" in kwargs:
+                kwargs["understanding"] = _to_jsonable(kwargs.get("understanding"))
+
+            if "training_packet" in kwargs and "training_packet" not in inspect.signature(original).parameters:
+                kwargs.pop("training_packet", None)
+
+            return original(self, *args, **kwargs)
+
+        cls.check_and_fix = patched_check_and_fix
+
+    for _, obj in vars(appmod).items():
+        if inspect.isclass(obj) and getattr(obj, "__name__", "") == "ReplySelfCheckEngine" and hasattr(obj, "check_and_fix"):
+            try:
+                patch_class(obj)
+            except Exception:
+                pass
 
 
 def _patch_build_reply_prompt_json_safe():
     original = appmod.build_reply_prompt
 
     def patched_build_reply_prompt(*args, **kwargs):
-        if "understanding" in kwargs:
-            kwargs["understanding"] = _to_jsonable(kwargs.get("understanding"))
-        if "reply_plan" in kwargs:
-            kwargs["reply_plan"] = _to_jsonable(kwargs.get("reply_plan"))
-        if "selected_content" in kwargs:
-            kwargs["selected_content"] = _to_jsonable(kwargs.get("selected_content"))
-        if "user_state_snapshot" in kwargs:
-            kwargs["user_state_snapshot"] = _to_jsonable(kwargs.get("user_state_snapshot"))
+        args = list(args)
+        for idx in [1, 6, 7, 8]:
+            if idx < len(args):
+                args[idx] = _to_jsonable(args[idx])
+
+        for key in ["recent_context", "understanding", "reply_plan", "selected_content", "memory_summary", "user_state_snapshot"]:
+            if key in kwargs:
+                kwargs[key] = _to_jsonable(kwargs.get(key))
         return original(*args, **kwargs)
 
     appmod.build_reply_prompt = patched_build_reply_prompt
 
 
+def _patch_conversation_repo_save_message():
+    cls = appmod.ConversationRepository
+    original = cls.save_message
+
+    def patched_save_message(self, conversation_id, sender_type, message_type, text, raw_payload=None, media_url=None):
+        return original(
+            self,
+            conversation_id,
+            sender_type,
+            message_type,
+            text,
+            raw_payload=_to_jsonable(raw_payload or {}),
+            media_url=media_url,
+        )
+
+    cls.save_message = patched_save_message
+
+
 _patch_release_flag_compat()
 _patch_soft_clip()
+_patch_json_dumps_safe()
 _patch_reply_style_generate()
 _patch_reply_self_check()
 _patch_build_reply_prompt_json_safe()
+_patch_conversation_repo_save_message()
 
 Settings = appmod.Settings
 setup_logging = appmod.setup_logging
