@@ -1,4 +1,5 @@
 import os
+import inspect
 import step92_structural_convergence_final_cutover as appmod
 
 
@@ -47,7 +48,98 @@ def _patch_release_flag_compat():
     appmod._step82_collect_release_candidate_report = patched_report_builder
 
 
+def _patch_soft_clip_compat():
+    """
+    Step70/71 预览文本依赖 _soft_clip，但当前 step92 最终层没有定义它。
+    这里补一个轻量兼容实现，避免统一素材编辑器/媒体上传回执 500。
+    """
+    if hasattr(appmod, "_soft_clip"):
+        return
+
+    def _soft_clip(value, limit=120):
+        text = "" if value is None else str(value)
+        try:
+            limit_int = int(limit)
+        except Exception:
+            limit_int = 120
+        if limit_int <= 0:
+            return ""
+        if len(text) <= limit_int:
+            return text
+        if limit_int == 1:
+            return "…"
+        return text[: limit_int - 1] + "…"
+
+    appmod._soft_clip = _soft_clip
+
+
+def _make_generate_compat_wrapper(original_generate):
+    original_sig = inspect.signature(original_generate)
+    accepts_var_kwargs = any(
+        p.kind == inspect.Parameter.VAR_KEYWORD
+        for p in original_sig.parameters.values()
+    )
+    accepted_names = set(original_sig.parameters.keys())
+
+    def wrapped(self, *args, **kwargs):
+        if accepts_var_kwargs:
+            return original_generate(self, *args, **kwargs)
+        filtered_kwargs = {
+            k: v for k, v in kwargs.items()
+            if k in accepted_names and k != "self"
+        }
+        return original_generate(self, *args, **filtered_kwargs)
+
+    wrapped.__name__ = getattr(original_generate, "__name__", "generate")
+    wrapped.__doc__ = getattr(original_generate, "__doc__", None)
+    return wrapped
+
+
+def _patch_reply_style_engine_generate_class(engine_cls):
+    if engine_cls is None:
+        return
+    generate = getattr(engine_cls, "generate", None)
+    if generate is None or getattr(generate, "_runtime_compat_patched", False):
+        return
+
+    sig = inspect.signature(generate)
+    accepts_var_kwargs = any(
+        p.kind == inspect.Parameter.VAR_KEYWORD
+        for p in sig.parameters.values()
+    )
+    if accepts_var_kwargs or "training_packet" in sig.parameters:
+        return
+
+    wrapped = _make_generate_compat_wrapper(generate)
+    wrapped._runtime_compat_patched = True
+    setattr(engine_cls, "generate", wrapped)
+
+
+
+def _patch_reply_style_engine_compat():
+    """
+    Step78/79 之后的调用给 ReplyStyleEngine.generate 传了 training_packet，
+    但当前生效类签名没跟上。这里做签名兼容，过滤掉旧版本不认识的 kwargs。
+    """
+    engine_cls = getattr(appmod, "ReplyStyleEngine", None)
+    _patch_reply_style_engine_generate_class(engine_cls)
+
+
+def _patch_runtime_instances(app_components):
+    engine = app_components.get("reply_style_engine")
+    if engine is not None:
+        _patch_reply_style_engine_generate_class(engine.__class__)
+
+    orchestrator = app_components.get("orchestrator")
+    if orchestrator is not None:
+        nested_engine = getattr(orchestrator, "reply_style_engine", None)
+        if nested_engine is not None:
+            _patch_reply_style_engine_generate_class(nested_engine.__class__)
+
+
 _patch_release_flag_compat()
+_patch_soft_clip_compat()
+_patch_reply_style_engine_compat()
 
 Settings = appmod.Settings
 setup_logging = appmod.setup_logging
@@ -70,6 +162,7 @@ def create_app():
     logger.info("Starting application via main.py wrapper.")
 
     app_components = build_app_components(settings)
+    _patch_runtime_instances(app_components)
 
     tg_client = app_components["tg_client"]
     if settings.telegram_webhook_url:
