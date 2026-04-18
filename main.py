@@ -1,6 +1,6 @@
 import os
 import inspect
-import step94_reply_cadence_v1 as appmod
+import step107_final_merged_release_candidate as appmod
 
 
 def _to_jsonable(obj, depth=0):
@@ -99,7 +99,7 @@ def _patch_soft_clip():
             text = "" if value is None else str(value)
             if limit is None or limit <= 0:
                 return text
-            return text if len(text) <= limit else text[: max(0, limit - 1)] + "â¦"
+            return text if len(text) <= limit else text[: max(0, limit - 1)] + "…"
         appmod._soft_clip = _soft_clip
 
 
@@ -208,9 +208,6 @@ def create_app():
 
     logger.info("Starting application via main.py wrapper.")
 
-    # IMPORTANT:
-    # initialize_runtime() is what starts outbound_sender_worker.
-    # Using build_app_components() directly will enqueue replies but never send them.
     app_components = initialize_runtime(settings)
 
     app = create_web_app(settings, app_components)
